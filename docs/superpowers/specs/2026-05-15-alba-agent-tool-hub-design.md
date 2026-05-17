@@ -119,6 +119,12 @@ agenthub 启动时握手：未知 major → 拒绝运行 + 提示升级；未知
 
 ### 1.6 实机验证清单（实现阶段处理）
 
+**✅ 已验证（v0.1.x 实施过程，2026-05-17）：**
+- Profile / project / adopt / sync / doctor / bootstrap CLI 全部跑通
+- Apply pipeline 跨 `~/.claude/skills/` 实测安全（manifest-driven UNLINK 修复了 v0.1.0 数据丢失 bug）
+- pyright + ruff + 88% coverage 在 Python 3.13 上稳定
+
+**⏳ 待 Plan 2 / 3 / 4 实施时验证：**
 - Codex plugin 安装 CLI 入口和约定
 - Codex 用户级独立 command 是否支持（疑似仅 plugin-bundled）
 - Codex MCP server 配置具体落点（settings vs plugin .mcp.json vs config.toml）
@@ -806,7 +812,8 @@ agenthub apply --target claude --profile work
 ### 11.1 强保证
 
 - **Pre-flight collision check**：apply 在任何写操作前确认目标位置无冲突
-- **原子换位**：staging → live 走 `os.rename`，单 dir 内 POSIX 原子
+- **Manifest-driven UNLINK**（v0.1.1 起）：agenthub 只对 `last-apply.json` 记录的条目做 UNLINK；用户预存内容永不被触碰。首次 apply 无 manifest → UNLINK 集合为空
+- **原子换位**：staging → live 走 `os.rename`，单 dir 内 POSIX 原子。**注**：v0.1 实施简化为 per-op 执行（`os.symlink` / `os.unlink` 直接对 live 操作），借助 Manifest-driven UNLINK 保证 mid-flight 崩溃只影响 agenthub 自创内容，**不影响用户数据**。完整的 staging→rename 留待 v0.2 实施（见 §12 候选）
 - **Plan-before-mutate**：所有写操作默认先 plan、确认后执行
 - **不自动 git commit**：始终 Alba review 后手动 commit
 - **不静默 stash**：本地改动备份到 `~/.agenthub/stash/`，不污染 git stash 栈
@@ -825,6 +832,11 @@ agenthub apply --target claude --profile work
 
 ## §12 Phase 2 候选清单
 
+**实施期间新增（v0.1.x 学到的）：**
+- **真正的 staging + atomic rename**（spec §11.1 那条 v0.1 简化掉的强保证）—— 把 staging tree 整体 `os.rename` 到 live；mid-flight 崩溃自动回滚到上一致状态。当前 v0.1.2 的 manifest-driven UNLINK 已保证不丢用户数据，但 agenthub 自管内容的 partial state 仍需 `doctor` 修。
+- **Shared `AgenthubError` 基类**（v0.1.x 实施暴露的 CLI catch 站点增生）—— 当前 `RenderError` / `ApplyError` / `ProfileError` / `ConfigError` / `HubError` 是平行 `Exception` 子类，CLI 已经在 catch 元组里列两个，再加新错误类型时催生重复。统一基类后 `except AgenthubError` 一处搞定。
+
+**原列项：**
 - `agenthub mcp adopt --from-settings ...` 从 settings.json 反抽 MCP
 - `agenthub mcp test <name>` 启动验证
 - 真 profile 继承（`extends = "..."`）
