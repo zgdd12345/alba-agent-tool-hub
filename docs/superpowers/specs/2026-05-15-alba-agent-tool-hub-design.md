@@ -125,7 +125,7 @@ agenthub 启动时握手：未知 major → 拒绝运行 + 提示升级；未知
 - pyright + ruff + 88% coverage 在 Python 3.13 上稳定
 
 **⏳ 待 Plan 2 / 3 / 4 实施时验证：**
-- Codex plugin 安装 CLI 入口和约定
+- ~~Codex plugin 安装 CLI 入口和约定~~ ✅ 已验证（v0.3.2，2026-05-18）：`codex plugin marketplace {add,upgrade,remove}` 子命令；没有独立的 `install`。启用插件靠在 `~/.codex/config.toml` 写 `[plugins."<plugin>@<marketplace>"] enabled = true`。marketplace name 由上游 manifest 提供（如 `openai-curated`）—— agenthub 要求用户在 `plugin add -t codex` 时显式传 `--marketplace-name`。
 - Codex 用户级独立 command 是否支持（疑似仅 plugin-bundled）
 - Codex MCP server 配置具体落点（settings vs plugin .mcp.json vs config.toml）
 - Codex 项目级 MCP 是否支持
