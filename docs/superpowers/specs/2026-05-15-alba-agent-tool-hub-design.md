@@ -127,9 +127,9 @@ agenthub 启动时握手：未知 major → 拒绝运行 + 提示升级；未知
 **⏳ 待 Plan 2 / 3 / 4 实施时验证：**
 - ~~Codex plugin 安装 CLI 入口和约定~~ ✅ 已验证（v0.3.2，2026-05-18）：`codex plugin marketplace {add,upgrade,remove}` 子命令；没有独立的 `install`。启用插件靠在 `~/.codex/config.toml` 写 `[plugins."<plugin>@<marketplace>"] enabled = true`。marketplace name 由上游 manifest 提供（如 `openai-curated`）—— agenthub 要求用户在 `plugin add -t codex` 时显式传 `--marketplace-name`。
 - Codex 用户级独立 command 是否支持（疑似仅 plugin-bundled）
-- Codex MCP server 配置具体落点（settings vs plugin .mcp.json vs config.toml）
-- Codex 项目级 MCP 是否支持
-- OpenCode 的 MCP `type` 取值范围
+- ~~Codex MCP server 配置具体落点~~ ✅ 已验证（v0.4，2026-05-18）：`codex mcp add/remove/list/get` 标准 CLI；底层存 `~/.codex/config.toml`。
+- ~~Codex 项目级 MCP 是否支持~~ ✅ 不支持（Codex 用 `-c` 覆盖只支持标量），agenthub 项目级 MCP 仅作用于 Claude/OpenCode。
+- ~~OpenCode 的 MCP `type` 取值范围~~ ✅ `local` (command 数组) 或 `remote` (url + 可选 headers)，文件 `~/.config/opencode/opencode.json` mcp 节段，env 放 `environment` key。
 - OpenCode plugin npm 安装的具体调用约定（bun vs npm vs pnpm）
 
 ## §2 Profile 系统
