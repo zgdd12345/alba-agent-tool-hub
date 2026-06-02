@@ -20,11 +20,11 @@
 
 ## 2. 当前状态（main，全绿）
 
-- `cargo test`（全量,含集成）：**1523 passed / 0 failed**（lib 1437）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
-- 前端 `vitest`：**297 passed**（55 文件）；`tsc --noEmit` 净
-- 已交付并合并到 main 的增量：**1（fork 基础）、2（Commands）、2.5（Agents）、3a（Profiles 核心+激活）**
-- DB schema 版本：**v13**（commands=v11，agents=v12,profiles=v13;3b 复用 v13 既建的 profile_dotfiles/apply_manifest,无需再迁移）
-- main HEAD：`00446655`(3a merge)。3a 顺手清了 6 个**预存** `--all-targets` clippy lint(proxy.rs 测试模块 + 2 个集成测试文件;非 profile 文件)。
+- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1458）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
+- 前端 `vitest`：**303 passed**（56 文件）；`tsc --noEmit` 净
+- 已交付并合并到 main 的增量：**1（fork 基础）、2（Commands）、2.5（Agents）、3a（Profiles 核心+激活）、3b-1（Profile dotfiles:settings.json+statusline+manifest）**
+- DB schema 版本：**v14**（commands=v11,agents=v12,profiles=v13,apply_manifest.content_hash=v14;3b-2 复用现有表,迁移用幂等 `add_column_if_missing`）
+- main HEAD：`7c4f2bab`(3b-1 merge)。3a 已清 6 个预存 `--all-targets` clippy lint;故现在 `--all-targets` 也净。
 
 ## 3. ⚠️ 关键环境 GOTCHA（不看会浪费几小时）
 
@@ -53,12 +53,14 @@
 - **增量 2.5 — Agents（仅 Claude）**（merge cc6334c4）：commands 的精确克隆 → `agents` 表 v12 + `AgentService`（→ `~/.claude/agents/<name>.md`，同安全语义）+ 7 Tauri 命令 + **填充了原占位 Agents 视图**。顺手修 WebDAV 同步白名单漏洞（加 `commands`+`agents`）。
 - **增量 3a — Profiles 核心 + 激活（旗舰）**（merge `00446655`，分支已删）：`profiles`/`profile_dotfiles`/`apply_manifest` 表（schema **v13**；后两表建好但 3a 无 Rust 读写，留 3b）+ `Profile/ProfileSpec/ProfileContent` + profiles DAO（CRUD + `set/clear_active` 单行不变量事务）+ **`ProfileService::activate/deactivate`**（无状态 unit struct）+ 8 Tauri 命令 + WebDAV 接线 + 前端 Profiles 视图（api/hook/Panel/EditDialog + App.tsx five-touch + Layers nav + 四语 i18n）。**激活 = 纯 flag 翻转 + reconcile**（①复用 `ProviderService::switch`,provider 缺失则 warn+跳过；②按字面名全覆盖 4 类 enable-flag 到 spec;③4 个 reconciler **恒最后无条件**跑;④`set_active_profile` 最后）。**关键设计修正(超越原 study)：apply_manifest 在 3a 冗余——reconciler 已安全收敛,manifest 推迟到 3b 给 dotfiles 用。** **安全 blocker 修复**：`skill.rs` `sync_to_app_dir`/`remove_from_app`/reconcile-disable 分支全部硬化为「绝不 `remove_dir_all` 用户真实目录」(软链/内容哈希判别 + skip+warn)。三视角 Opus 总评审全 SOUND。
   - **3a 遗留 minor backlog(非阻断,记 3b 顺带)**：(1) `set_active_profile` 目标行不存在时仍提交(清空全部)——调用方 `activate` 已校验,可加 affected-rows 守卫;(2) skill 内容哈希 `compute_dir_hash` 跳过隐藏文件 → copy-mode 受管拷贝里用户新增的 `.dotfile` 可能在 disable 时被删(极窄;默认 Auto 走软链不受影响);(3) Profiles nav 按钮只在默认 app 分支(按计划,profiles 为 claude-only);(4) profiles 跨设备同步可致 `current_provider_id` 悬挂 FK——激活期 missing-provider 守卫已优雅降级。
+- **增量 3b-1 — Profile dotfiles 第一片(settings.json + statusline + manifest)**（merge `7c4f2bab`，分支已删）：`apply_manifest.content_hash`(schema **v14**,迁移用幂等 `add_column_if_missing`)+ `profile_dotfiles`/`manifest` DAO + 模型。**settings.json = 确定性重建**:active profile 的 settings.json 片段织入**唯一** effective-settings 构建器(`build_effective_settings_with_common_config`,provider→common→profile 三层 `json_deep_merge`),每次写/re-sync 都完整重生,**不进 manifest、无 diff 撤销**;backfill 用 `strip_fragment_restoring_provider_owned` **对称剥离**片段(差值覆盖时**恢复 provider 原值**,修复了 provider-token 污染 CRITICAL + 评审发现的 provider-key 耐久性 important)。`statusline.sh` 整文件渲染(`profile_render.rs`:真路径校验器拒 `..`/绝对、**拒覆盖未纳管用户文件**、内容哈希所有权、manifest 只删我方未改文件)。activate 新时序:先读 outgoing → 渲染整文件 + manifest → 移除 outgoing 整文件 → `set_active` 倒二 → **最后显式重写 settings.json**(经 `get_effective_current_provider`)。deactivate = 确定性拆除(无 profile 层重写 + 删本 profile 整文件,保 provider 键)。4 Tauri 命令 + 前端 ProfileEditDialog 两个 dotfile 文本框 + 四语。片段**字面**用(`${VAR}` 在 3b-2)。三视角 Opus 总评审:safety 修 2 important 后全绿,consistency/interaction SOUND。
+  - **3b-1 遗留 minor(记 3b-2)**:(1) `validate_rel_path` 未 canonicalize,`~/.claude` 下预置软链子目录理论上可绕(被 render 所有权门缓解,超出 3b-1 威胁模型);(2) 死代码 `ConfigService::sync_current_providers_to_live`(无生产调用者,可删/`#[cfg(test)]`);(3) proxy 接管模式的 live 写不带 profile 片段(该模式 proxy 自管 live,可接受,文档化);(4) `get_profile_manifest` 命令无前端包装(3b-2 用);(5) `setDotfile` 已修为 `Promise<void>`。
 
 **已确立模式**：新「Claude-only 单文件内容类型」= 表(id/name/content/description/tags/enabled_claude/installed_at) + DAO + Service(直写+安全 reconcile) + 7 Tauri 命令 + 前端 tab(api/hook/Panel/EditDialog) + i18n。commands 与 agents 是两份范本。
 
 ## 6. 路线图
 
-- **增量 3 — Profiles（旗舰）**：已拆成 **3a / 3b / 3c**。**3a 已交付并合并(`00446655`)。下一步 = 3b**：dotfile 渲染(settings.json `json_deep_merge` 片段 + statusline.sh + CLAUDE.md 经 PromptService 仲裁)+ `${VAR}` 模板引擎 + **apply_manifest 的 DAO/写入/diff-删除**(3a 已建表,激活时记录磁盘产物,切换时安全移除上个 profile 所建——含 4 类内容 + dotfile,统一经 manifest)。然后 **3c**:@tag(加 `skills.tags` 列 + `json_each` 解析)。详见 §7。
+- **增量 3 — Profiles（旗舰）**：拆成 **3a / 3b-1 / 3b-2 / 3c**。**3a + 3b-1 已交付并合并(3b-1 = `7c4f2bab`)。下一步 = 3b-2**:`${VAR}` 模板引擎(优先级 profile vars > provider env > 进程env[前缀白名单];替换在片段 `from_str` 前;密钥不入 manifest)+ **CLAUDE.md 仲裁**(profile 经 PromptService 委派,`prompt_id` + 允许内联文本自动建隐藏 prompt 行;每次 activate 无条件重置 + 旁路时告警)+ 前端富 dotfile/vars 编辑器 + `get_profile_manifest` 前端包装 + 清 3b-1 遗留 minor。**注意 3b-1 已把 settings.json 做成确定性重建(不进 manifest),3b-2 的 CLAUDE.md 经 PromptService(也不进 manifest 整文件流);manifest 当前仅管 statusline 类整文件。** 然后 **3c**:@tag(加 `skills.tags` 列 + `json_each` 解析)。详见 §7。
 - **增量 4 — Projects**：按目录绑定不同内容（`<project>/.<tool>/`），与全局通道正交。
 - **增量 5 — Source ingestion**：从上游 git 仓拉 skills/commands/agents，**不用 git**（HTTP archive 下载 + 备份后覆盖 + detach）。
 
