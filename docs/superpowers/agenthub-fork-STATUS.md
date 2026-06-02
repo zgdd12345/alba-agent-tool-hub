@@ -1,0 +1,105 @@
+# AgentHub Fork — 项目状态与续接手册（HANDOFF）
+
+> **更新于 2026-06-02。** 这是「清空上下文后从这里继续」的权威文档。读完它 + git 历史 + 记忆文件即可无缝接续。
+
+---
+
+## 0. 一句话
+
+把 cc-switch（Tauri 2 桌面应用，Rust + React）**fork** 成 **AgentHub**，逐步加入 agenthub 愿景的能力（profiles / 跨工具内容管理）。用户 Alba 选择了「fork + 用 cc-switch 的栈/风格二次开发」，放弃了原 Python agenthub CLI（退为蓝图）。
+
+## 1. 仓库与位置
+
+- **代码（fork）**：`/Users/fsm/project/MyProject/agentplugin/cc-switch-cloud`（origin `git@github.com:zgdd12345/cc-switch-cloud`，分支 `main`）。产品已改名 **AgentHub**。
+- **文档/计划/规格（本仓）**：`/Users/fsm/project/MyProject/agentplugin/alba-agent-tool-hub`
+  - 设计 spec：`docs/superpowers/specs/2026-06-01-agenthub-gui-ccswitch-fork-design.md`
+  - 计划：`docs/superpowers/plans/2026-06-0X-*.md`（fork-foundation / inc2-commands / inc2.5-agents）
+  - 本手册：`docs/superpowers/agenthub-fork-STATUS.md`
+- **旧 Python agenthub CLI（仅作蓝图参考，不再运行）**：`/Users/fsm/project/MyProject/agentplugin/agenthub`（v0.4.1，171 测试）。
+- **cc-switch 源码快照**（study 时用）：`/tmp/cc-switch-src`（临时，重启后可能没了；需要可从 `/tmp/ccsw.tar.gz` 重解，或直接读 cc-switch-cloud）。
+
+## 2. 当前状态（main，全绿）
+
+- `cargo test`：**1504 passed / 0 failed**；`clippy -D warnings` 净；`cargo fmt --check` 净
+- 前端 `vitest`：**292 passed**；`tsc --noEmit` 净
+- 已交付并合并到 main 的增量：**1（fork 基础）、2（Commands）、2.5（Agents）**
+- DB schema 版本：**v12**（commands=v11，agents=v12;下一个 profiles=v13）
+
+## 3. ⚠️ 关键环境 GOTCHA（不看会浪费几小时）
+
+1. **`cc` 被劫持**：全局 npm 包 `@wcldyx/claude-code-switcher` 在 `~/.nvm/.../bin/cc` 占用了 `cc`，遮蔽真编译器 → 仓库已有 **gitignored `.cargo/config.toml`** 强制 `/usr/bin/cc`，**保留它**。
+2. **cargo 不在默认 PATH**：在 `~/.cargo/bin` → 所有 cargo 命令前 `export PATH="$HOME/.cargo/bin:$PATH"`。Rust 工具链 1.95（rust-toolchain.toml 钉定）。
+3. **pnpm 11 预检会失败**（忽略 esbuild/msw 构建）→ 前端**直接调** `./node_modules/.bin/vitest run` 和 `./node_modules/.bin/tsc --noEmit`，**别用** `pnpm test:unit`/`pnpm typecheck`。
+4. **网络慢**：cargo 下载超时就加 `CARGO_NET_RETRY=10 CARGO_HTTP_LOW_SPEED_LIMIT=0`。
+5. Rust 测试隔离 HOME 用 `CC_SWITCH_TEST_HOME`（保留此环境变量名,勿改）；用 `#[serial]` 防并发。
+6. **提交前先 `cargo fmt`**（多次发现实现 subagent 漏格式化）。tauri build 需 `dist/` → 干净 checkout 先 `./node_modules/.bin/vite build`。
+7. 验证别用 `… | grep -c …` 收尾（grep 零匹配返回 1，会假报失败）；cargo test 真实退出码用 `> log 2>&1; echo $?` 捕获(管道会掩盖)。
+
+## 4. 工作方法（每个增量都照此）
+
+**纪律弧**：①（用户说 workflow 时）**study workflow** 摸清要镜像/复用的 cc-switch 机制 → ② **writing-plans** 写 bite-sized、无占位、TDD 的计划（存 plans/，提交）→ 用户审 → ③ **subagent-driven-development** 逐任务执行 → ④ **finishing-a-development-branch** 合并。
+
+**分层模型（用户明确要求，已入全局 CLAUDE.md）**：困难/正确性关键（迁移、service 安全、激活流水线、总评审、对抗审查）用 **Opus**；中等（DAO、Tauri 命令、前端）用 **Sonnet**;机械抽取用 **Haiku**。study workflow 也分层。
+
+**每任务**：派实现 subagent（给全文，不让它读计划文件）→ 我独立确定性核实（grep + 复跑测试）+ spec/质量评审（关键任务 Opus，含对抗式安全评审）→ 修 → 标记完成。每增量末 Opus 总评审 + 合并后复验。
+
+**用户偏好**：分支收尾一贯选「本地 `--no-ff` 合并到 main」。
+
+## 5. 已交付增量明细
+
+- **增量 1 — fork 基础**（merge 9ee7cf00 + 修 e164ee68）：cc-switch→AgentHub 改名（identity `dev.agenthub.app`/scheme `agenthub`/crate `agenthub`+`agenthub_lib`/tray/log + 用户可见 i18n/UI）；配置目录迁 `~/.agenthub` + `agenthub.db`（3 处绕过点，无脑裂）；禁用自动更新（方案 B）；剥离全部赞助/联盟（providers 保留）。**功能性 `cc-switch` 标识符有意保留**（proxy 错误码、codex 旧数据检测、WebDAV 远端名 `cc-switch-sync`、localStorage 键、SQL 导出头、`CC_SWITCH_TEST_HOME`、`SkillStorageLocation="cc_switch"` enum）。修了一个上游日期 flaky 测试（usage_rollup 用本地日）。
+- **增量 2 — Commands（仅 Claude）**（merge ef70c418）：`commands` 表 v11 + `CommandService`（内容存 DB,启用时**原子直写** `~/.claude/commands/<name>.md`,**安全 reconcile**:只遍历 DB 行、绝不枚举删用户文件,name 校验防穿越)+ 7 Tauri 命令 + Commands tab/面板/编辑对话框 + i18n。设计=内容存 DB + 直写(非软链)。
+- **增量 2.5 — Agents（仅 Claude）**（merge cc6334c4）：commands 的精确克隆 → `agents` 表 v12 + `AgentService`（→ `~/.claude/agents/<name>.md`，同安全语义）+ 7 Tauri 命令 + **填充了原占位 Agents 视图**。顺手修 WebDAV 同步白名单漏洞（加 `commands`+`agents`）。
+
+**已确立模式**：新「Claude-only 单文件内容类型」= 表(id/name/content/description/tags/enabled_claude/installed_at) + DAO + Service(直写+安全 reconcile) + 7 Tauri 命令 + 前端 tab(api/hook/Panel/EditDialog) + i18n。commands 与 agents 是两份范本。
+
+## 6. 路线图
+
+- **增量 3 — Profiles（旗舰）**：已拆成 **3a / 3b / 3c**（用户批准）。**3a 是下一步,未开始。** 详见 §7。
+- **增量 4 — Projects**：按目录绑定不同内容（`<project>/.<tool>/`），与全局通道正交。
+- **增量 5 — Source ingestion**：从上游 git 仓拉 skills/commands/agents，**不用 git**（HTTP archive 下载 + 备份后覆盖 + detach）。
+
+## 7. 增量 3（Profiles）—— study 已完成，结论固化于此（3a 不必重跑 study）
+
+**愿景**：profile（per-tool、命名）绑定 (a) 该工具的一个 provider，(b) 启用的内容集（skills/commands/agents/mcp，按字面名或 @tag），(c) dotfiles（CLAUDE.md/settings.json/statusline.sh，含 `${VAR}`）。**激活 profile** = 切 provider + 把内容启用标志翻成 profile 的集合并落地 + 渲染 dotfiles + 在 **apply_manifest** 记录所写，以便下次切换**安全移除上次所建**（绝不碰用户文件）。一致性规则：激活 profile = 唯一真相源（激活态下手动开关即编辑该 profile）。v1 = **仅全局通道**（项目通道是增量 4）。
+
+**study 关键结论（REUSE vs MISSING）**：
+- **provider 切换 = REUSE** `ProviderService::switch`（src-tauri/src/services/provider/mod.rs；处理 proxy 接管热切换分支、backfill 保留手改、设设备本地 settings.json `current_provider_<app>` + DB `is_current`、写原生配置、MCP 同步）。激活的「设 provider」步直接调它。
+- **内容落地多数 REUSE**：skills（`services/skill.rs` `sync_to_app_dir`/`sync_to_app` 软链+reconcile）、commands（`services/command.rs` 直写+reconcile）、agents（`services/agent.rs` 同）、mcp（`services/mcp.rs` `sync_all_enabled` 合并写；**Claude MCP 在 `~/.claude.json` 不在 settings.json**；Gemini MCP 在 `~/.gemini/settings.json`）、prompts（`prompt.rs` 是现有 CLAUDE.md/AGENTS.md 整文件写入者）。
+- **最尖锐冲突**：Claude `settings.json` 现在是 provider blob **整文件覆盖**（`services/config.rs` via `sanitize_claude_settings_for_live`）。profile 的 settings.json 层**必须**在 provider 写之后用 `json_deep_merge`(live.rs:99)**深合并片段**、并记录片段以便 `json_deep_remove`(live.rs:117) 撤销——**绝不整文件覆盖**。statusline.sh 无人写（profile 可干净接管）。CLAUDE.md 被 PromptService 整文件占用 → 需仲裁（建议 profile 驱动 prompt 子系统）。
+- **apply_manifest 必须新建且 DEVICE-LOCAL（不同步）**：因一致性规则会重写 DB 启用标志,reconciler 无法重建上个 profile 建了什么 → 必须显式记录每件磁盘产物（软链/写入文件/合并片段/翻的标志）。类比 `proxy_live_backup`（已在 SYNC_SKIP/PRESERVE）。
+- **`${VAR}` 引擎缺失**：无密钥库/模板引擎。值主源 = 激活 provider 的 `settings_config.env`（REUSE，已含 ANTHROPIC_AUTH_TOKEN 等）；需建替换函数 + profile-vars 表 + 优先级。安全：manifest 别存渲染后的密钥,存模板 id+hash。
+- **@tag**：`mcp_servers`/`commands`/`agents` 已有 `tags` 列;**`skills` 表缺 `tags` 列**(3c 加)。解析用 `json_each`。
+- **WebDAV**：新表自动进整库快照导出;`profiles`/`profile_dotfiles` 加进 `should_trigger_for_table` 同步白名单;`apply_manifest` 加进 `SYNC_SKIP_TABLES`+`SYNC_PRESERVE_TABLES`(设备本地)。
+- **前端**:同 Commands/Agents 的 App.tsx 接线模式(View union/VALID_VIEWS/renderContent/toolbar/header)加 Profiles 视图(全局,不限 app);加 active-profile 徽章。
+
+**新表 DDL（schema v13，study 提议）**：
+```sql
+profiles(id TEXT PK, app_type TEXT NOT NULL, name TEXT NOT NULL, description TEXT,
+  is_active BOOLEAN DEFAULT 0, current_provider_id TEXT, spec TEXT NOT NULL DEFAULT '{}',
+  sort_index INTEGER, created_at INTEGER, UNIQUE(app_type,name),
+  FOREIGN KEY(current_provider_id,app_type) REFERENCES providers(id,app_type) ON DELETE SET NULL)
+profile_dotfiles(profile_id TEXT, rel_path TEXT, content TEXT, PRIMARY KEY(profile_id,rel_path),
+  FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE)
+apply_manifest(id INTEGER PK AUTOINCREMENT, channel TEXT DEFAULT 'global', profile_id TEXT,
+  app_type TEXT, target_path TEXT, kind TEXT, created_at INTEGER,
+  FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE)
+```
+profiles.spec JSON 形如 `{content:{skills:[],commands:[],agents:[],mcp:[]}, vars:{}}`（3a 按字面名;@tag 在 3c）。
+
+**3a 范围（下一步要做的）**：profiles/profile_dotfiles/apply_manifest 表（v13）+ ProfileService 激活流水线（调 `ProviderService::switch` + 按 spec 翻 skills/commands/agents/mcp 启用并跑各自现有 reconciler + apply_manifest 安全增删）+ Profiles tab/面板（建/激活/编辑 profile、active 徽章）+ 「激活=唯一真相源」一致性。**不含** dotfile 渲染/`${VAR}`（3b）、@tag（3c）。激活流水线 + apply_manifest 安全语义是重点 → 用 **Opus**。
+
+**study workflow run id**：`wf_7e36f97a-3b0`（4 份报告已读;若要原文可重跑或查 transcript）。
+
+## 8. 清空上下文后如何继续
+
+1. 新会话会自动加载记忆 `agenthub-ccswitch-direction.md`（已含本状态摘要 + 环境 gotcha）。
+2. 读本手册（尤其 §3 gotcha、§7 增量 3 study 结论）。
+3. 说「开始 3a」即可:据 §7 写 3a 计划(writing-plans)→ 审 → subagent-driven 分层执行(激活流水线/apply_manifest 用 Opus)→ 合并。
+4. 可选:先 `pnpm tauri dev`(在 cc-switch-cloud,注意 §3 PATH/cc gotcha)验收已交付的 Commands/Agents tab。
+
+## 9. 待办/已记的小项（非阻断）
+
+- C3/agents service 硬化 NICE-TO-HAVE：符号链接删除回归测试、import 重名 stem 部分失败处理、name 长度上限。
+- AgentsPanel 有个未用的 `currentApp?` 可选 prop（无害）。
+- 若干 cc-switch 文档注释仍提旧名（cosmetic，功能性标识符是有意保留的，见 §5）。
