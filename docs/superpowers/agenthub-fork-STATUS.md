@@ -103,15 +103,20 @@ profiles.spec JSON 形如 `{content:{skills:[],commands:[],agents:[],mcp:[]}, va
 
 **study workflow run id**：`wf_7e36f97a-3b0`（4 份报告已读;若要原文可重跑或查 transcript）。
 
-## 8. 清空上下文后如何继续
+## 8. 清空上下文后如何继续（当前里程碑:Profiles 旗舰已收官,下一步 = 增量 4 Projects）
 
-1. 新会话会自动加载记忆 `agenthub-ccswitch-direction.md`（已含本状态摘要 + 环境 gotcha）。
-2. 读本手册（尤其 §3 gotcha、§7 增量 3 study 结论）。
-3. 说「开始 3a」即可:据 §7 写 3a 计划(writing-plans)→ 审 → subagent-driven 分层执行(激活流水线/apply_manifest 用 Opus)→ 合并。
-4. 可选:先 `pnpm tauri dev`(在 cc-switch-cloud,注意 §3 PATH/cc gotcha)验收已交付的 Commands/Agents tab。
+1. 新会话自动加载记忆 `agenthub-ccswitch-direction.md`（含 Profiles 收官摘要 + 环境 gotcha + 下一步)。
+2. 读本手册:**§3 环境 gotcha(必看)、§4 工作方法、§5 已交付明细、§6 路线图**。(§7 是增量 3 的 study,Profiles 已全做完,仅供回溯。)
+3. **说「开始增量 4」** 即可,据既定纪律弧推进:
+   - ① **计划预备 workflow**(核实当前代码锚点 + Opus 设计 + Opus 对抗式查漏,分层模型)
+   - ② **writing-plans** 写 bite-sized/TDD/无占位计划(存 `docs/superpowers/plans/`,提交)→ 交用户审
+   - ③ **subagent-driven** 分层批次执行:每任务 实现 subagent →(关键任务)spec + 对抗式安全评审 /(次要)spec + 质量评审 → 修;Opus 用于迁移/激活/安全核心,Sonnet 用于 DAO/命令/前端,事实抽取用 Sonnet/Haiku
+   - ④ **finishing-a-development-branch**:本地 `--no-ff` 合并 main + 合并后复验全绿 + 删分支 + 还原 pnpm 噪声 + 刷新本手册/记忆。
+4. **增量 4 = Projects**:按目录绑定 profile/内容集(`<project>/.<tool>/`),与全局通道正交。**`apply_manifest` 的 `channel` 列已为 `project:<path>` 预留**(3a 建,目前恒 'global')。增量 5 = Source ingestion(HTTP 拉取,不用 git,备份+替换+detach)。
+5. **复发教训(务必)**:改某 struct 字段 / 删 pub API 时,**必须 grep `tests/`**——集成测试是独立 crate,只 grep `src/` 会让 `--lib` 通过但 `--all-targets`/全量 `cargo test` 编译失败(3b-2 的 ConfigService、3c 的 InstalledSkill 各踩一次)。**验证门用 `cargo clippy --all-targets -- -D warnings` + 全量 `cargo test`(非 `--lib`,否则集成测试不编译)+ 前端 `./node_modules/.bin/{tsc --noEmit, vitest run}`。**
+6. 可选:`pnpm tauri dev`(cc-switch-cloud,注意 §3 PATH/cc gotcha)验收完整 Profiles(provider + 内容 + @tag + dotfiles + `${VAR}` + CLAUDE.md)。
 
-## 9. 待办/已记的小项（非阻断）
+## 9. 待办/已记的小项（非阻断,可在后续增量顺带）
 
-- C3/agents service 硬化 NICE-TO-HAVE：符号链接删除回归测试、import 重名 stem 部分失败处理、name 长度上限。
-- AgentsPanel 有个未用的 `currentApp?` 可选 prop（无害）。
-- 若干 cc-switch 文档注释仍提旧名（cosmetic，功能性标识符是有意保留的，见 §5）。
+- **Profiles minors**:(3b-2)进程env 跨会话变动可致 settings.json 片段 backfill 重渲染失配(窄,已注释,建议片段用 spec.vars/provider.env);(3b-3)`__profile__:` 保留前缀仅在 upsert(enabled=true)拦截、未全命令层校验;CLAUDE.md textarea 未 app-gate(后端硬门兜底);delete_profile 用 active_profile 表代理隐藏行 enabled 态;(3c)v16 迁移测试未走真·无列 ALTER 路径(helper 已验证);缺「字面∩@tag 同项」去重测试(HashSet 可证)。
+- 旧:agents/commands service 硬化 nice-to-have(符号链接删除回归测试、import 重名 stem、name 长度上限);AgentsPanel 未用 `currentApp?` prop;若干 cc-switch 文档注释仍提旧名(cosmetic,功能性标识符有意保留,见 §5)。
