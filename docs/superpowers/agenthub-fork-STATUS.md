@@ -1,6 +1,6 @@
 # AgentHub Fork — 项目状态与续接手册（HANDOFF）
 
-> **更新于 2026-06-02。** 这是「清空上下文后从这里继续」的权威文档。读完它 + git 历史 + 记忆文件即可无缝接续。
+> **更新于 2026-06-03。** 这是「清空上下文后从这里继续」的权威文档。读完它 + git 历史 + 记忆文件即可无缝接续。
 
 ---
 
@@ -20,11 +20,11 @@
 
 ## 2. 当前状态（main，全绿）
 
-- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1513）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
-- 前端 `vitest`：**314 passed**（57 文件）；`tsc --noEmit` 净
-- 已交付并合并到 main 的增量:**1(fork)、2(Commands)、2.5(Agents)、3a(Profiles 核心+激活)、3b-1(dotfiles)、3b-2(`${VAR}`)、3b-3(CLAUDE.md)、3c(@tag)** —— **🎉 Profiles 旗舰(增量 3)全部收官。**
-- DB schema 版本:**v16**(commands=v11,agents=v12,profiles=v13,apply_manifest.content_hash=v14,prompts.hidden=v15,skills.tags=v16)
-- main HEAD:`c47df504`(3c merge)。`--all-targets` clippy 净。**下一支柱 = 增量 4(Projects)。**
+- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1540，14 个 test 二进制全 ok）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
+- 前端 `vitest`：**316 passed**（58 文件）；`tsc --noEmit` 净
+- 已交付并合并到 main 的增量:**1(fork)、2(Commands)、2.5(Agents)、3a–3c(Profiles 旗舰全局通道)、4a(Projects——项目通道 Claude 内容物化)** —— Profiles(增量 3)收官 + Projects 项目通道脊柱(4a)已落地。
+- DB schema 版本:**v17**(commands=v11,agents=v12,profiles=v13,apply_manifest.content_hash=v14,prompts.hidden=v15,skills.tags=v16,**projects 表+apply_manifest.project_id=v17**)
+- main HEAD:`2e26f866`(4a merge)。`--all-targets` clippy 净。**下一步 = 增量 4b(Claude 项目 dotfiles:CLAUDE.md 根重定向 + settings.json/.mcp.json MERGE + `${VAR}`)。**
 
 ## 3. ⚠️ 关键环境 GOTCHA（不看会浪费几小时）
 
@@ -61,12 +61,18 @@
   - **3b-3 遗留 minor(非阻断)**:(1) `__profile__:` 保留前缀仅在 upsert(enabled=true)拦截,未在所有命令层校验(shipped UI 不可达);(2) CLAUDE.md textarea 未 app-gate(与 settings/statusline 同款,后端硬门兜底,inert);(3) delete_profile 用 active_profile 表代理隐藏行 enabled 态(理论边缘)。
 - **增量 3c — @tag 选择器(Profiles 旗舰收官)**（merge `c47df504`，分支已删）：profile spec.content 的条目前缀 `@` = tag 选择器,激活时展开成「该内容类型中 tags 含此 tag 的全部项」并与字面名取并集翻 enable-flag。`skills.tags` 列(**v16**,`TEXT NOT NULL DEFAULT '[]'`,幂等 `add_column_if_missing` + table_exists 守卫)+ `InstalledSkill.tags`(全仓 16 处 `InstalledSkill{}` 字面含 tests/skill_sync.rs 均补;update 站点 `skill.tags.clone()` 防清空)+ `update_skill_tags` DAO/命令/前端编辑器。解析用纯函数 `resolve_selectors`(services/profile.rs):**大小写敏感、内存解析(非 json_each)**、字面项行为与 3a 完全一致(零回归)、未知/空 @tag → 零展开 + **可区分**警告非报错、并集去重(HashSet)、skills/mcp 仅翻本 app flag(mcp 先不可变借用构 want 再 values_mut)。前端 UnifiedSkillsPanel 加标签输入 + ProfileEditDialog 4 列表 placeholder 提示 @tagname + 四语。三视角 Opus 总评审全 **SOUND**(0 blocker;2 minor:v16 迁移测试未走真·无列 ALTER 路径[helper 已验证]、缺字面∩@tag 同项去重测试[HashSet 可证])。**修了一处回归:T2 仅 grep src/,漏了 tests/skill_sync.rs 的 4 处 InstalledSkill 字面 → `--all-targets` 编译失败 → 已补(同 3b-2 教训:判改点须含 tests/)。**
 
-**已确立模式**：新「Claude-only 单文件内容类型」= 表(id/name/content/description/tags/enabled_claude/installed_at) + DAO + Service(直写+安全 reconcile) + 7 Tauri 命令 + 前端 tab(api/hook/Panel/EditDialog) + i18n。commands 与 agents 是两份范本。
+- **增量 4a — Projects 项目通道(Claude 内容物化,加固版)**（merge `2e26f866`,分支已删）：把真实磁盘项目目录绑定到**自有内容集**,**COPY**(非软链)物化 Claude 的 skills/commands/agents 到 `<project>/.claude/{skills,commands,agents}/`,每个写入文件记入 **project_id 域**的 apply_manifest(`channel="project:<canonpath>"`),detach 仅哈希门 owned-delete 自己写的、绝不碰用户文件。schema **v17**(`projects` 表 + `apply_manifest.project_id` 裸列**无 FK**——base CREATE 与迁移收敛,且 FK 会挡住证明路径复用保护的"外来/孤儿"行)。**两个对抗 CRITICAL 已内建**:①`ProjectBase` 路径安全门——规范化后**硬拒** project_root 等于/祖先/后代 于 `$HOME`、各工具目录、`~/.agenthub`、`/`,及 `<root>/.claude` 软链塌缩到 `~/.claude`(9 用例,honor `CC_SWITCH_TEST_HOME`,**apply/detach 每次都重跑**,杜绝项目通道写进全局 `~/.claude`);②路径复用守卫——reconcile 按 `project_id` 分区,**外来 project_id 的快照行 skip+warn 绝不删**(re-clone 同路径不会误删新克隆),+ apply 起始处 `prune_orphan_project_channels`(仅删路径已消失的孤儿**行**,不删文件)。决策:**自有内容集 + 可选「从 profile 一次性深拷贝播种」(非实时链接)**;**设备本地**(projects 不入 WebDAV 白名单);**仅 Claude**。8 个 `project_*` Tauri 命令 + 前端 Projects tab(api/hook/Panel/BindDialog:目录选择器+播种+includes 编辑+manifest 视图)+ App 接线 + 四语。write-then-record 崩溃自愈(atomic_write 临时+rename)。**范围严格收边:无 settings.json MERGE / 无项目 CLAUDE.md / 无 .mcp.json / 无 `${VAR}` / 无非 Claude(全留 4b/4c)。** 纪律弧:计划预备 workflow(锚点+Opus 设计+Opus 对抗查漏)→ writing-plans(Opus 起草/对抗审/修)→ 14 任务 subagent-driven(分层模型,32 agents)→ Opus 总评审 **SOUND**(0 blocker)→ `--no-ff` 合并。
+  - **4a 遗留 minor(非阻断,记 4b 顺带)**:(1) skill 拆除按 SSOT 当前哈希判别(非记录哈希)→ SSOT 更新后 detach 会**跳过(漏删拷贝)而非误删**,fail-safe,建议加注释;(2) repo 移动+原路径重建时 `apply/detach`(用 entered_path 派生 channel)与 `project_manifest`(用 project_path 派生)可能指向不同 channel——benign(save 时 gate 强制一致,移动后 apply 会干净报错),可在 apply/detach 改从 project_path 派生 channel 求对称;(3) 单次 apply 内 resolve→write 间的 TOCTOU 窗口(与既有全局 profile_render 同款暴露,下次 apply 重 resolve 即闭合)。
+
+**已确立模式**：新「Claude-only 单文件内容类型」= 表(id/name/content/description/tags/enabled_claude/installed_at) + DAO + Service(直写+安全 reconcile) + 7 Tauri 命令 + 前端 tab(api/hook/Panel/EditDialog) + i18n。commands 与 agents 是两份范本。**项目通道模式**:物化函数加 `base: &Path` 参数(全局 caller 字节不变)+ `ProjectBase` 安全门 + `project_id` 域 manifest + owned-delete 哈希门;`ProjectApplyService` 是 4b/4c 范本。
 
 ## 6. 路线图
 
-- **增量 3 — Profiles（旗舰）✅ 已收官**：3a + 3b-1 + 3b-2 + 3b-3 + 3c 全部交付并合并(3c = `c47df504`)。profile = per-tool 命名配置,绑 provider + 内容集(skills/commands/agents/mcp,按字面名或 `@tag`)+ dotfiles(settings.json 片段确定性重建 / statusline.sh / CLAUDE.md 经 prompt 子系统 / `${VAR}` 模板),激活=切 provider + 翻 flag + reconcile + dotfile 渲染 + manifest 安全增删,active=唯一真相源。**下一步 = 增量 4(Projects)。**
-- **增量 4 — Projects**：按目录绑定不同内容（`<project>/.<tool>/`），与全局通道正交。
+- **增量 3 — Profiles（旗舰）✅ 已收官**：3a + 3b-1 + 3b-2 + 3b-3 + 3c 全部交付并合并(3c = `c47df504`)。profile = per-tool 命名配置,绑 provider + 内容集(skills/commands/agents/mcp,按字面名或 `@tag`)+ dotfiles(settings.json 片段确定性重建 / statusline.sh / CLAUDE.md 经 prompt 子系统 / `${VAR}` 模板),激活=切 provider + 翻 flag + reconcile + dotfile 渲染 + manifest 安全增删,active=唯一真相源。
+- **增量 4 — Projects**：按目录绑定内容(`<project>/.<tool>/`),与全局通道正交。拆 **4a/4b/4c**:
+  - **4a ✅ 已交付并合并**(`2e26f866`):`projects` 表(v17)+ `ProjectBase` 安全门 + Claude 的 skills/commands/agents **COPY** 物化 + `project_id` 域 manifest + 安全 detach/reconcile + Projects 前端。详见 §5。
+  - **4b(下一步)**:Claude 项目 dotfiles —— `<project>/CLAUDE.md`(根重定向,非 `.claude/` 下)+ `<project>/.claude/settings.json` **MERGE** + `<project>/.mcp.json` **MERGE** + `${VAR}` 渲染。**关键风险(对抗审查已标)**:merge 拆除若仅靠 `json_deep_remove` 删键会**永久丢用户冲突值**(`json_deep_merge` 直接覆盖、无真相源,不同于全局通道有 provider 存储)→ **必须先快照冲突键原值再还原,或拒覆盖已存在键**;须像 3b-1/2/3 那样**单独成 reviewable 子增量**。`apply_manifest.owned_keys` 列(记录我方合并的键路径)在 4b 引入(v18)。
+  - **4c(延后)**:非 Claude 项目通道(Codex/OpenCode `<project>/AGENTS.md` + 各自 dotdir,OpenCode 用单数 `command`/`agent`;Gemini 蓝图缺 target)。依赖未核实的各工具项目路径行为,且需 `ProjectBase` 长出 per-(app,kind) content_subdir 映射。
 - **增量 5 — Source ingestion**：从上游 git 仓拉 skills/commands/agents，**不用 git**（HTTP archive 下载 + 备份后覆盖 + detach）。
 
 ## 7. 增量 3（Profiles）—— study 结论（**3a 已交付**；下方为 3b/3c 仍有效的依据）
@@ -103,20 +109,21 @@ profiles.spec JSON 形如 `{content:{skills:[],commands:[],agents:[],mcp:[]}, va
 
 **study workflow run id**：`wf_7e36f97a-3b0`（4 份报告已读;若要原文可重跑或查 transcript）。
 
-## 8. 清空上下文后如何继续（当前里程碑:Profiles 旗舰已收官,下一步 = 增量 4 Projects）
+## 8. 清空上下文后如何继续（当前里程碑:Profiles 旗舰收官 + Projects 4a 已落地,下一步 = 增量 4b Claude 项目 dotfiles）
 
-1. 新会话自动加载记忆 `agenthub-ccswitch-direction.md`（含 Profiles 收官摘要 + 环境 gotcha + 下一步)。
-2. 读本手册:**§3 环境 gotcha(必看)、§4 工作方法、§5 已交付明细、§6 路线图**。(§7 是增量 3 的 study,Profiles 已全做完,仅供回溯。)
-3. **说「开始增量 4」** 即可,据既定纪律弧推进:
+1. 新会话自动加载记忆 `agenthub-ccswitch-direction.md`（含 Profiles 收官 + 4a 摘要 + 环境 gotcha + 下一步)。
+2. 读本手册:**§3 环境 gotcha(必看)、§4 工作方法、§5 已交付明细(尤其 4a + 项目通道模式)、§6 路线图(4b 关键风险)**。(§7 是增量 3 的 study,仅供回溯。)
+3. **说「开始增量 4b」** 即可,据既定纪律弧推进:
    - ① **计划预备 workflow**(核实当前代码锚点 + Opus 设计 + Opus 对抗式查漏,分层模型)
    - ② **writing-plans** 写 bite-sized/TDD/无占位计划(存 `docs/superpowers/plans/`,提交)→ 交用户审
-   - ③ **subagent-driven** 分层批次执行:每任务 实现 subagent →(关键任务)spec + 对抗式安全评审 /(次要)spec + 质量评审 → 修;Opus 用于迁移/激活/安全核心,Sonnet 用于 DAO/命令/前端,事实抽取用 Sonnet/Haiku
-   - ④ **finishing-a-development-branch**:本地 `--no-ff` 合并 main + 合并后复验全绿 + 删分支 + 还原 pnpm 噪声 + 刷新本手册/记忆。
-4. **增量 4 = Projects**:按目录绑定 profile/内容集(`<project>/.<tool>/`),与全局通道正交。**`apply_manifest` 的 `channel` 列已为 `project:<path>` 预留**(3a 建,目前恒 'global')。增量 5 = Source ingestion(HTTP 拉取,不用 git,备份+替换+detach)。
-5. **复发教训(务必)**:改某 struct 字段 / 删 pub API 时,**必须 grep `tests/`**——集成测试是独立 crate,只 grep `src/` 会让 `--lib` 通过但 `--all-targets`/全量 `cargo test` 编译失败(3b-2 的 ConfigService、3c 的 InstalledSkill 各踩一次)。**验证门用 `cargo clippy --all-targets -- -D warnings` + 全量 `cargo test`(非 `--lib`,否则集成测试不编译)+ 前端 `./node_modules/.bin/{tsc --noEmit, vitest run}`。**
-6. 可选:`pnpm tauri dev`(cc-switch-cloud,注意 §3 PATH/cc gotcha)验收完整 Profiles(provider + 内容 + @tag + dotfiles + `${VAR}` + CLAUDE.md)。
+   - ③ **subagent-driven** 分层批次执行(串行,绝不并行实现):每任务 实现 subagent → 评审(独立复跑门 + spec/对抗安全)→ 修(≤2 轮);Opus 用于迁移/激活/安全核心,Sonnet 用于 DAO/命令/前端
+   - ④ **finishing-a-development-branch**:本地 `--no-ff` 合并 main + 合并后复验全绿 + 删分支 + 刷新本手册/记忆。
+4. **增量 4b = Claude 项目 dotfiles**(范围见 §6):`<project>/CLAUDE.md`(**根重定向**,用 `AppType::project_memory_filename` 已备)+ `settings.json`/`.mcp.json` **MERGE** + `${VAR}`。**头号难点(对抗审查已警示):merge 拆除必须先快照冲突键原值再还原(或拒覆盖已存在键)**,否则 `json_deep_merge` 覆盖 + `json_deep_remove` 只删键 = 永久丢用户值;引入 `apply_manifest.owned_keys`(v18);**单独成 reviewable 子增量**。复用脊柱:4a 的 `ProjectBase`(加 `memory_file/mcp_file/settings_file` 入口,根重定向已在 `ProjectBase` 预留语义)、`profile_vars.rs`(`${VAR}`,加 project vars 适配)、`live.rs::json_deep_merge/remove`(现为 private,须 pub 或抽出)。**增量 4c**(非 Claude)与**增量 5**(Source ingestion,HTTP 不用 git)随后。
+5. **复发教训(务必)**:改某 struct 字段 / 删 pub API 时,**必须 grep `tests/`**——集成测试是独立 crate,只 grep `src/` 会让 `--lib` 通过但 `--all-targets`/全量 `cargo test` 编译失败(3b-2 ConfigService、3c InstalledSkill 各踩一次;4a 的 `ManifestEntry.project_id` 因照此做未再踩)。**验证门用 `cargo clippy --all-targets -- -D warnings` + 全量 `cargo test`(非 `--lib`)+ 前端 `./node_modules/.bin/{tsc --noEmit, vitest run}`,退出码用 `> log 2>&1; echo $?` 捕获。**
+6. 可选:`pnpm tauri dev`(注意 §3 PATH/cc gotcha)验收 Projects 4a(绑目录→播种/编辑 includes→Apply 看 `<project>/.claude/` 出现拷贝→手建 `mine.md`→Detach 验拷贝删、`mine.md` 存、空 `.claude` 留;绑 `$HOME` 应被安全门拒)。
 
 ## 9. 待办/已记的小项（非阻断,可在后续增量顺带）
 
+- **Projects(4a)minors**(Opus 总评审 SOUND 后记,均 fail-safe/benign):(1) skill 拆除按 SSOT 当前哈希(非记录哈希)判别 → SSOT 更新后 detach 漏删拷贝而非误删,建议加注释;(2) repo 移动+原路径重建时 apply/detach(entered_path 派生 channel)与 project_manifest(project_path 派生)可能不同 channel,benign,可改从 project_path 派生求对称;(3) 单次 apply 内 resolve→write 的 TOCTOU 窗口(同既有全局 profile_render,下次 apply 重 resolve 闭合);(4) `spec.vars` 已存但 4a 未读(留 4b)。
 - **Profiles minors**:(3b-2)进程env 跨会话变动可致 settings.json 片段 backfill 重渲染失配(窄,已注释,建议片段用 spec.vars/provider.env);(3b-3)`__profile__:` 保留前缀仅在 upsert(enabled=true)拦截、未全命令层校验;CLAUDE.md textarea 未 app-gate(后端硬门兜底);delete_profile 用 active_profile 表代理隐藏行 enabled 态;(3c)v16 迁移测试未走真·无列 ALTER 路径(helper 已验证);缺「字面∩@tag 同项」去重测试(HashSet 可证)。
 - 旧:agents/commands service 硬化 nice-to-have(符号链接删除回归测试、import 重名 stem、name 长度上限);AgentsPanel 未用 `currentApp?` prop;若干 cc-switch 文档注释仍提旧名(cosmetic,功能性标识符有意保留,见 §5)。
