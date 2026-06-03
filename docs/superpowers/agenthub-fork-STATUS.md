@@ -20,11 +20,11 @@
 
 ## 2. 当前状态（main，全绿）
 
-- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1499）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
-- 前端 `vitest`：**311 passed**（56 文件）；`tsc --noEmit` 净
-- 已交付并合并到 main 的增量:**1(fork 基础)、2(Commands)、2.5(Agents)、3a(Profiles 核心+激活)、3b-1(dotfiles:settings.json+statusline+manifest)、3b-2(`${VAR}` 模板+vars 编辑器)、3b-3(CLAUDE.md 仲裁)** —— **整个 Profiles 旗舰除 3c(@tag)外已完成**。
-- DB schema 版本:**v15**(commands=v11,agents=v12,profiles=v13,apply_manifest.content_hash=v14,prompts.hidden=v15)
-- main HEAD:`13e1118d`(3b-3 merge)。`--all-targets` clippy 净。
+- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1513）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
+- 前端 `vitest`：**314 passed**（57 文件）；`tsc --noEmit` 净
+- 已交付并合并到 main 的增量:**1(fork)、2(Commands)、2.5(Agents)、3a(Profiles 核心+激活)、3b-1(dotfiles)、3b-2(`${VAR}`)、3b-3(CLAUDE.md)、3c(@tag)** —— **🎉 Profiles 旗舰(增量 3)全部收官。**
+- DB schema 版本:**v16**(commands=v11,agents=v12,profiles=v13,apply_manifest.content_hash=v14,prompts.hidden=v15,skills.tags=v16)
+- main HEAD:`c47df504`(3c merge)。`--all-targets` clippy 净。**下一支柱 = 增量 4(Projects)。**
 
 ## 3. ⚠️ 关键环境 GOTCHA（不看会浪费几小时）
 
@@ -59,12 +59,13 @@
   - **3b-2 遗留 minor(记 3b-3)**:进程env(最低层)值跨会话变动可让 settings.json 片段里引用的 process-env 值在 backfill 重渲染时失配(窄;已加代码注释,建议片段用 spec.vars/provider.env 这两层 DB 稳定源)。
 - **增量 3b-3 — CLAUDE.md 仲裁(经 PromptService 隐藏 prompt 行)**（merge `13e1118d`，分支已删）：profile 携带**字面** CLAUDE.md(存 profile_dotfiles rel_path=="CLAUDE.md",**不渲染 `${VAR}`** → 渲染密钥不入 DB)。profile **驱动 PromptService**(`~/.claude/CLAUDE.md` 唯一写者),经派生隐藏行 `__profile__:<id>` + `enable_prompt`。schema **v15** 加 `prompts.hidden`:`get_prompts` 过滤(UI/import 不见隐藏行)、新增 `get_prompts_with_hidden`/`get_prompt_with_hidden`;**enable 单一启用 sweep / backfill 扫描 / upsert any_enabled / delete 守卫全改用 `_with_hidden`**;enable_prompt **对 `__profile__:` 启用行跳过 backfill**(模板权威,用户手改不灌回模板)。activate step5b(set_active 后、settings 重建前,**硬门 AppType::Claude**)建/更新隐藏行并 enable;**切到无 CLAUDE.md 的 profile 时拆除出向隐藏行**(评审 important 修复:否则旧 CLAUDE.md 残留);deactivate 拉黑;delete_profile 清隐藏行(None 安全、无孤儿)。upsert_prompt 拒对 `__profile__:` 行 enabled=true(防御性)。前端 ProfileEditDialog CLAUDE.md textarea(空则删)+ 四语。三视角 Opus 总评审:safety/consistency SOUND,regression 修 1 important 后全绿。
   - **3b-3 遗留 minor(非阻断)**:(1) `__profile__:` 保留前缀仅在 upsert(enabled=true)拦截,未在所有命令层校验(shipped UI 不可达);(2) CLAUDE.md textarea 未 app-gate(与 settings/statusline 同款,后端硬门兜底,inert);(3) delete_profile 用 active_profile 表代理隐藏行 enabled 态(理论边缘)。
+- **增量 3c — @tag 选择器(Profiles 旗舰收官)**（merge `c47df504`，分支已删）：profile spec.content 的条目前缀 `@` = tag 选择器,激活时展开成「该内容类型中 tags 含此 tag 的全部项」并与字面名取并集翻 enable-flag。`skills.tags` 列(**v16**,`TEXT NOT NULL DEFAULT '[]'`,幂等 `add_column_if_missing` + table_exists 守卫)+ `InstalledSkill.tags`(全仓 16 处 `InstalledSkill{}` 字面含 tests/skill_sync.rs 均补;update 站点 `skill.tags.clone()` 防清空)+ `update_skill_tags` DAO/命令/前端编辑器。解析用纯函数 `resolve_selectors`(services/profile.rs):**大小写敏感、内存解析(非 json_each)**、字面项行为与 3a 完全一致(零回归)、未知/空 @tag → 零展开 + **可区分**警告非报错、并集去重(HashSet)、skills/mcp 仅翻本 app flag(mcp 先不可变借用构 want 再 values_mut)。前端 UnifiedSkillsPanel 加标签输入 + ProfileEditDialog 4 列表 placeholder 提示 @tagname + 四语。三视角 Opus 总评审全 **SOUND**(0 blocker;2 minor:v16 迁移测试未走真·无列 ALTER 路径[helper 已验证]、缺字面∩@tag 同项去重测试[HashSet 可证])。**修了一处回归:T2 仅 grep src/,漏了 tests/skill_sync.rs 的 4 处 InstalledSkill 字面 → `--all-targets` 编译失败 → 已补(同 3b-2 教训:判改点须含 tests/)。**
 
 **已确立模式**：新「Claude-only 单文件内容类型」= 表(id/name/content/description/tags/enabled_claude/installed_at) + DAO + Service(直写+安全 reconcile) + 7 Tauri 命令 + 前端 tab(api/hook/Panel/EditDialog) + i18n。commands 与 agents 是两份范本。
 
 ## 6. 路线图
 
-- **增量 3 — Profiles（旗舰）**：拆成 **3a / 3b-1 / 3b-2 / 3b-3 / 3c**。**3a + 3b-1 + 3b-2 + 3b-3 已交付并合并(3b-3 = `13e1118d`)。Profiles 旗舰仅剩 3c。下一步 = 3c = @tag**:给 `skills` 表加 `tags` 列(v16,幂等 `add_column_if_missing`),profile spec.content 支持 `@tagname` 语法,激活时用 `json_each` 把 @tag 展开成内容 id 集(commands/agents/mcp 已有 `tags` 列;skills 需补)。其余内容类型(commands/agents/mcp)的 @tag 解析可一并做。完成后 Profiles 旗舰收官。
+- **增量 3 — Profiles（旗舰）✅ 已收官**：3a + 3b-1 + 3b-2 + 3b-3 + 3c 全部交付并合并(3c = `c47df504`)。profile = per-tool 命名配置,绑 provider + 内容集(skills/commands/agents/mcp,按字面名或 `@tag`)+ dotfiles(settings.json 片段确定性重建 / statusline.sh / CLAUDE.md 经 prompt 子系统 / `${VAR}` 模板),激活=切 provider + 翻 flag + reconcile + dotfile 渲染 + manifest 安全增删,active=唯一真相源。**下一步 = 增量 4(Projects)。**
 - **增量 4 — Projects**：按目录绑定不同内容（`<project>/.<tool>/`），与全局通道正交。
 - **增量 5 — Source ingestion**：从上游 git 仓拉 skills/commands/agents，**不用 git**（HTTP archive 下载 + 备份后覆盖 + detach）。
 
