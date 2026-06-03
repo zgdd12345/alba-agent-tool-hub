@@ -20,11 +20,11 @@
 
 ## 2. 当前状态（main，全绿）
 
-- `cargo test`（全量,含集成）：**全绿 0 failed**（lib ~1485）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
-- 前端 `vitest`：**307 passed**（56 文件）；`tsc --noEmit` 净
-- 已交付并合并到 main 的增量：**1（fork 基础）、2（Commands）、2.5（Agents）、3a（Profiles 核心+激活）、3b-1（dotfiles:settings.json+statusline+manifest）、3b-2（`${VAR}` 模板 + vars 编辑器）**
-- DB schema 版本：**v14**（commands=v11,agents=v12,profiles=v13,apply_manifest.content_hash=v14;3b-2 无 schema 变更）
-- main HEAD：`d86a7d66`(3b-2 merge)。`--all-targets` clippy 净(3a 已清 6 个预存 lint)。
+- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1499）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
+- 前端 `vitest`：**311 passed**（56 文件）；`tsc --noEmit` 净
+- 已交付并合并到 main 的增量:**1(fork 基础)、2(Commands)、2.5(Agents)、3a(Profiles 核心+激活)、3b-1(dotfiles:settings.json+statusline+manifest)、3b-2(`${VAR}` 模板+vars 编辑器)、3b-3(CLAUDE.md 仲裁)** —— **整个 Profiles 旗舰除 3c(@tag)外已完成**。
+- DB schema 版本:**v15**(commands=v11,agents=v12,profiles=v13,apply_manifest.content_hash=v14,prompts.hidden=v15)
+- main HEAD:`13e1118d`(3b-3 merge)。`--all-targets` clippy 净。
 
 ## 3. ⚠️ 关键环境 GOTCHA（不看会浪费几小时）
 
@@ -57,12 +57,14 @@
   - **3b-1 遗留 minor(记 3b-2)**:(1) `validate_rel_path` 未 canonicalize,`~/.claude` 下预置软链子目录理论上可绕(被 render 所有权门缓解,超出 3b-1 威胁模型);(2) 死代码 `ConfigService::sync_current_providers_to_live`(无生产调用者,可删/`#[cfg(test)]`);(3) proxy 接管模式的 live 写不带 profile 片段(该模式 proxy 自管 live,可接受,文档化);(4) `get_profile_manifest` 命令无前端包装(3b-2 用);(5) `setDotfile` 已修为 `Promise<void>`。
 - **增量 3b-2 — `${VAR}` 模板引擎(settings.json + statusline)+ vars 编辑器**（merge `d86a7d66`，分支已删）：`services/profile_vars.rs`(`build_var_map` 优先级 **profile.spec.vars > 激活 provider settings_config.env > 进程env[白名单 `ANTHROPIC_`/`AGENTHUB_`/`CLAUDE_`]** + `substitute_vars`:`${NAME}`/`${NAME:-default}`、**无递归**、json-escape、未知保留字面+警告)。渲染应用于 **settings.json 片段**(`build_effective_settings_with_common_config` 内 `from_str` 前,json_escape=true)与 **statusline.sh**(activate,json_escape=false);三处共用一张 map(确定性)。**backfill 用「重渲染后」的出向片段剥离**(`strip_fragment_restoring_provider_owned`)——修复渲染密钥回灌 provider 的 CRITICAL(评审中 T2 抓到并 revert 验证)。前端:vars 键值编辑器(写 `spec.vars`)+ 只读 "Applied files"(manifest)视图 + `get_profile_manifest` 包装。清 3b-1 minor:`validate_rel_path` 加 canonicalize 软链逃逸防护;**注意**:T4 误删 `ConfigService::sync_*` 簇(集成测试 `import_export_sync.rs` 在用,非死代码)→ 已恢复(教训:判死代码须 grep `tests/`)。**`${VAR}` 不渲染 CLAUDE.md;无 schema 变更。** 三视角 Opus 总评审全 **SOUND**(0 blocker)。
   - **3b-2 遗留 minor(记 3b-3)**:进程env(最低层)值跨会话变动可让 settings.json 片段里引用的 process-env 值在 backfill 重渲染时失配(窄;已加代码注释,建议片段用 spec.vars/provider.env 这两层 DB 稳定源)。
+- **增量 3b-3 — CLAUDE.md 仲裁(经 PromptService 隐藏 prompt 行)**（merge `13e1118d`，分支已删）：profile 携带**字面** CLAUDE.md(存 profile_dotfiles rel_path=="CLAUDE.md",**不渲染 `${VAR}`** → 渲染密钥不入 DB)。profile **驱动 PromptService**(`~/.claude/CLAUDE.md` 唯一写者),经派生隐藏行 `__profile__:<id>` + `enable_prompt`。schema **v15** 加 `prompts.hidden`:`get_prompts` 过滤(UI/import 不见隐藏行)、新增 `get_prompts_with_hidden`/`get_prompt_with_hidden`;**enable 单一启用 sweep / backfill 扫描 / upsert any_enabled / delete 守卫全改用 `_with_hidden`**;enable_prompt **对 `__profile__:` 启用行跳过 backfill**(模板权威,用户手改不灌回模板)。activate step5b(set_active 后、settings 重建前,**硬门 AppType::Claude**)建/更新隐藏行并 enable;**切到无 CLAUDE.md 的 profile 时拆除出向隐藏行**(评审 important 修复:否则旧 CLAUDE.md 残留);deactivate 拉黑;delete_profile 清隐藏行(None 安全、无孤儿)。upsert_prompt 拒对 `__profile__:` 行 enabled=true(防御性)。前端 ProfileEditDialog CLAUDE.md textarea(空则删)+ 四语。三视角 Opus 总评审:safety/consistency SOUND,regression 修 1 important 后全绿。
+  - **3b-3 遗留 minor(非阻断)**:(1) `__profile__:` 保留前缀仅在 upsert(enabled=true)拦截,未在所有命令层校验(shipped UI 不可达);(2) CLAUDE.md textarea 未 app-gate(与 settings/statusline 同款,后端硬门兜底,inert);(3) delete_profile 用 active_profile 表代理隐藏行 enabled 态(理论边缘)。
 
 **已确立模式**：新「Claude-only 单文件内容类型」= 表(id/name/content/description/tags/enabled_claude/installed_at) + DAO + Service(直写+安全 reconcile) + 7 Tauri 命令 + 前端 tab(api/hook/Panel/EditDialog) + i18n。commands 与 agents 是两份范本。
 
 ## 6. 路线图
 
-- **增量 3 — Profiles（旗舰）**：拆成 **3a / 3b-1 / 3b-2 / 3b-3 / 3c**。**3a + 3b-1 + 3b-2 已交付并合并(3b-2 = `d86a7d66`)。下一步 = 3b-3 = CLAUDE.md 仲裁**:profile 经 PromptService 委派(`prompt_id` 或 profile_dotfiles 的 `CLAUDE.md` 项 → 派生隐藏 prompt 行 `__profile__:<id>`;v15 加 `prompts.hidden` 列 + DAO `get_*_with_hidden` 给 enable_prompt 的单一启用扫描用;每次 activate 无条件 enable_prompt + 旁路时告警;deactivate 经 upsert_prompt(false) 拉黑)。**关键安全约束(对抗审查发现,3b-3 必须解决)**:若渲染 CLAUDE.md 的 `${VAR}`,渲染后密钥会落进 DB `prompts.content`(CRITICAL)→ 故 **3b-3 的 CLAUDE.md 用字面文本、不渲染 `${VAR}`**(或单独脱敏设计);并处理 enable_prompt live-backfill 把用户手改文件灌进 profile 行的 clobber edge,以及 upsert_prompt 的 any_enabled 须用 `get_*_with_hidden`。然后 **3c**:@tag(加 `skills.tags` 列 + `json_each`)。详见 §7。
+- **增量 3 — Profiles（旗舰）**：拆成 **3a / 3b-1 / 3b-2 / 3b-3 / 3c**。**3a + 3b-1 + 3b-2 + 3b-3 已交付并合并(3b-3 = `13e1118d`)。Profiles 旗舰仅剩 3c。下一步 = 3c = @tag**:给 `skills` 表加 `tags` 列(v16,幂等 `add_column_if_missing`),profile spec.content 支持 `@tagname` 语法,激活时用 `json_each` 把 @tag 展开成内容 id 集(commands/agents/mcp 已有 `tags` 列;skills 需补)。其余内容类型(commands/agents/mcp)的 @tag 解析可一并做。完成后 Profiles 旗舰收官。
 - **增量 4 — Projects**：按目录绑定不同内容（`<project>/.<tool>/`），与全局通道正交。
 - **增量 5 — Source ingestion**：从上游 git 仓拉 skills/commands/agents，**不用 git**（HTTP archive 下载 + 备份后覆盖 + detach）。
 
