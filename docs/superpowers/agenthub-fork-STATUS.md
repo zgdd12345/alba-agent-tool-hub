@@ -20,11 +20,11 @@
 
 ## 2. 当前状态（main，全绿）
 
-- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1584，14 个 test 二进制全 ok）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
+- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1599,14 个 test 二进制全 ok）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
 - 前端 `vitest`：**318 passed**（59 文件）；`tsc --noEmit` 净
-- 已交付并合并到 main 的增量:**1(fork)、2(Commands)、2.5(Agents)、3a–3c(Profiles 旗舰全局通道)、4a(Projects 项目通道)、4b-1(项目 CLAUDE.md)、4b-2(项目 settings.json MERGE + `${VAR}`)**。
-- DB schema 版本:**v18**(…skills.tags=v16,projects 表+apply_manifest.project_id=v17,**apply_manifest.owned_keys=v18**)。4b-2 的 `ProjectSpec.dotfiles.settings` 走 spec JSON blob serde(无存储迁移;v18 仅为 owned_keys)。
-- main HEAD:`9a170fe4`(4b-2 merge)。`--all-targets` clippy 净。**下一步 = 增量 4b-3(`<project>/.mcp.json` MERGE,复用 4b-2 已验证的 merge 引擎,契约见 §6)。**
+- 已交付并合并到 main 的增量:**1(fork)、2(Commands)、2.5(Agents)、3a–3c(Profiles 旗舰全局通道)、4a(Projects 项目通道)、4b-1/4b-2/4b-3(项目 dotfiles:CLAUDE.md + settings.json MERGE + .mcp.json MERGE)** —— **🎉 增量 4b(Claude 项目 dotfiles)三片全部收官。**
+- DB schema 版本:**v18**(…skills.tags=v16,projects 表+apply_manifest.project_id=v17,apply_manifest.owned_keys=v18)。4b-2/4b-3 的内容走 spec JSON blob serde(无存储迁移;v18 仅为 owned_keys)。
+- main HEAD:`6b79aeca`(4b-3 merge)。`--all-targets` clippy 净。**下一步 = 增量 4c(非 Claude 项目通道,可选 breadth)或直接 增量 5(Source ingestion)——见 §6/§8。** Claude 的 Projects(4a+4b)已完整。
 
 ## 3. ⚠️ 关键环境 GOTCHA（不看会浪费几小时）
 
@@ -68,7 +68,8 @@
   - **4b-1 遗留 minor(非阻断)**:`memory_file` 未重 canonicalize → `<root>/CLAUDE.md` 若为软链会被 `exists()`/读跟随;但 prior=None→判未纳管→skip + `fs::rename` 替换链接本身,无可利用的穿写,与既有全局 `render_whole_file` 同款 posture,可选加一行注释。
 - **增量 4b-2 — 项目 settings.json MERGE + `${VAR}`(数据安全危险核心)**（merge `9a170fe4`,分支已删）:项目携带 settings.json 片段(`project.spec.dotfiles.settings`,可含 `${VAR}`,serde 存 spec blob);apply 时**渲染**(json_escape=true)→**深合并**进 `<project>/.claude/settings.json`,每个被覆盖/插入的叶记入 `apply_manifest.owned_keys`(**schema v18**;版本信封 `{v:1,keys:[{path,prior:{present,value},wrote}]}`)。**拆除(detach + 重 apply)按叶粒度 `reverse_merge`**:`cur==wrote` 才还原 prior / 删插入叶,否则留用户改动;**绝不整文件删 merge 文件**。新模块 `services/settings_merge.rs`(`merge_with_snapshot` 自足平行递归镜像 json_deep_merge 形状但**不调用**它;`reverse_merge` **无 collapse**——空对象留 `{}`;fail-closed:坏信封/版本/磁盘/缺文件均留文件)。`build_project_var_map`(project.spec.vars > provider env > 进程env白名单,**不**调 build_var_map 故不泄漏全局 profile vars)。**CRITICAL 安全**:`settings_merge` reverse 臂在 apply 预删 + detach 的 catch-all else **之前**(否则整文件删用户 settings.json);`content_hash=None` 防御纵深(误入 else 也 no-op);**重 apply 先 reverse 旧 merge 再重快照**(我方旧写不成新基线)。数组键(permissions.allow/deny、hooks)= **整数组替换**(detach 经快照还原)。13 任务 subagent-driven(34 agents),Opus 总评审发现 1 个 important(非对象根片段会静默 clobber 整文件)→ **已修(拒非对象根片段,warn+不写+不记行)+ 回归测试**,复审 SOUND。范围严格:settings.json only(`.mcp.json`=4b-3),无非 Claude / Windows cmd-c / `${VAR}`-in-CLAUDE.md。
   - **4b-2 遗留 minor(非阻断)**:空对象片段 `{}` 仍会 atomic-write + 记一条零键 settings_merge 行(reverse 为空操作重写),无害冗余,可在 `owned.is_empty()` 时短路省去。
-- **增量 4b-3(下一步,`.mcp.json` MERGE)契约**:复用 4b-2 已验证的 `merge_with_snapshot`/`reverse_merge` 引擎,仅合并 `mcpServers` 子树(server 由 `spec.content.mcp` id 取自 mcp_servers 表,剥 UI 字段 enabled/source/id/name/description/tags/homepage/docs);写 `<project>/.mcp.json`(项目根,绕开 home-global 的 `get_claude_mcp_path`);`kind="mcp_merge"` 加同样的 detach reverse 臂(在 catch-all else 之前);**无 `${VAR}`、无 Windows `cmd /c` 包裹**(跨机 repo 共享,文档化)。新增 `ProjectBase::mcp_file()` + `ProjectSpec.content.mcp` 已存(profile 同款)。无新 schema(owned_keys v18 已足)。
+- **增量 4b-3 — 项目 .mcp.json MERGE**（merge `6b79aeca`,分支已删）:项目 `content.mcp` id/@tag 经 `resolve_selectors` 解析 → mcp_servers 取 server → `strip_mcp_ui_fields` 剥 8 个 UI 字段(连接字段 type/command/args/env/url 留)→ 构 `{"mcpServers":{id:spec}}` → **复用 4b-2 `settings_merge::merge_with_snapshot` 引擎(逐字,无新 merge 代码)** 深合并进 `<project>/.mcp.json`(**项目根**,`ProjectBase::mcp_file()`,绕开 home-global `get_claude_mcp_path`),记 `kind="mcp_merge"` + owned_keys 信封。拆除 = **把 settings_merge 臂扩成一个合并臂** `r.kind == KIND_SETTINGS_MERGE || r.kind == KIND_MCP_MERGE`(在 catch-all else 之前,一处 dispatch;mcp_merge 行绝不会整文件删 .mcp.json,+ content_hash=None 防御纵深)。`KIND_*` 常量命名既有字面(**`kind`→enum 延后**)。Option<Value> 哨兵、空选择→不写文件不记行、非对象 server→warn+skip、重 apply 先 reverse 再合并。前端 ProjectBindDialog 新增 MCP includes 字段 + 四语。**无 `${VAR}`、无 Windows `cmd /c`、无新 schema(owned_keys v18 已足)、无非 Claude。** 7 任务 subagent-driven(14 agents),Opus 总评审 **SOUND**(仅删一处失效 `#[allow(dead_code)]`)。
+- **增量 4b ✅ 全部收官**(4b-1 + 4b-2 + 4b-3):Claude 项目通道的全部 dotfiles(CLAUDE.md 整文件 / settings.json MERGE / .mcp.json MERGE)落地。**下一步 = 4c(非 Claude,可选)或 增量 5。**
 **已确立模式**：新「Claude-only 单文件内容类型」= 表(id/name/content/description/tags/enabled_claude/installed_at) + DAO + Service(直写+安全 reconcile) + 7 Tauri 命令 + 前端 tab(api/hook/Panel/EditDialog) + i18n。commands 与 agents 是两份范本。**项目通道模式**:物化函数加 `base: &Path` 参数(全局 caller 字节不变)+ `ProjectBase` 安全门 + `project_id` 域 manifest + owned-delete 哈希门;`ProjectApplyService` 是 4b/4c 范本。
 
 ## 6. 路线图
@@ -78,9 +79,10 @@
   - **4a ✅ 已交付并合并**(`2e26f866`):`projects` 表(v17)+ `ProjectBase` 安全门 + Claude 的 skills/commands/agents **COPY** 物化 + `project_id` 域 manifest + 安全 detach/reconcile + Projects 前端。详见 §5。
   - **4b-1 ✅ 已交付并合并**(`0d2e856b`):`<project>/CLAUDE.md`(**根重定向**,字面整文件,哈希门,复用 4a teardown;无 schema 变更、无 merge)。详见 §5。
   - **4b-2 ✅ 已交付并合并**(`9a170fe4`):`<project>/.claude/settings.json` **MERGE** + `${VAR}`。merge 引擎(`services/settings_merge.rs`:`merge_with_snapshot`/`reverse_merge`)+ schema v18(`apply_manifest.owned_keys` 版本信封)+ apply/detach `settings_merge` reverse 臂(在 catch-all else 之前)+ 叶粒度 `cur==wrote` 拆除 + fail-closed + 拒非对象根片段。详见 §5。
-  - **4b-3(下一步)**:`<project>/.mcp.json` **MERGE**(项目根,只 `mcpServers` 子树,server 由 `spec.content.mcp` id 取自 mcp_servers 表,剥 UI 字段)。**复用 4b-2 已验证的 merge 引擎**(`kind="mcp_merge"` + 同款 reverse 臂,几乎免费)。无 `${VAR}`、无 Windows `cmd /c` 包裹(跨机 repo 共享,文档化为已知缺口)。新增 `ProjectBase::mcp_file()`;无新 schema。
-  - **4c(延后)**:非 Claude 项目通道(Codex/OpenCode `<project>/AGENTS.md` + 各自 dotdir,OpenCode 用单数 `command`/`agent`;Gemini 蓝图缺 target)。依赖未核实的各工具项目路径行为,且需 `ProjectBase` 长出 per-(app,kind) content_subdir 映射。
-- **增量 5 — Source ingestion**：从上游 git 仓拉 skills/commands/agents，**不用 git**（HTTP archive 下载 + 备份后覆盖 + detach）。
+  - **4b-3 ✅ 已交付并合并**(`6b79aeca`):`<project>/.mcp.json` **MERGE**(项目根,只 `mcpServers` 子树,server 由 `spec.content.mcp` id 取自 mcp_servers 表,剥 8 个 UI 字段)。**复用 4b-2 引擎逐字**(`kind="mcp_merge"` + 合并 reverse 臂 `settings_merge||mcp_merge`)。`KIND_*` 常量(`kind`→enum 延后)。前端 BindDialog MCP includes 字段。无 `${VAR}`/`cmd /c`/新 schema。详见 §5。
+  - **→ 增量 4b 三片(4b-1/4b-2/4b-3)全部收官;Claude 的 Projects(4a+4b)完整。**
+  - **4c(可选 breadth,下一步候选之一)**:非 Claude 项目通道(Codex/OpenCode `<project>/AGENTS.md` + 各自 dotdir,OpenCode 用单数 `command`/`agent`;Gemini 蓝图缺 target)。依赖未核实的各工具项目路径行为,且需 `ProjectBase` 长出 per-(app,kind) content_subdir 映射。breadth 非 depth,可延后或跳过。
+- **增量 5 — Source ingestion(下一步候选之一)**：从上游 git 仓拉 skills/commands/agents，**不用 git**（HTTP archive 下载 + 备份后覆盖 + detach）。Claude Projects 既已完整,可优先于 4c。
 
 ## 7. 增量 3（Profiles）—— study 结论（**3a 已交付**；下方为 3b/3c 仍有效的依据）
 
@@ -116,16 +118,15 @@ profiles.spec JSON 形如 `{content:{skills:[],commands:[],agents:[],mcp:[]}, va
 
 **study workflow run id**：`wf_7e36f97a-3b0`（4 份报告已读;若要原文可重跑或查 transcript）。
 
-## 8. 清空上下文后如何继续（当前里程碑:Profiles 收官 + Projects 4a + 项目 CLAUDE.md 4b-1 + 项目 settings.json MERGE 4b-2 已落地,下一步 = 增量 4b-3 项目 `.mcp.json` MERGE）
+## 8. 清空上下文后如何继续（当前里程碑:Profiles 收官 + **Projects 4a + 4b(4b-1/4b-2/4b-3)全部收官 = Claude Projects 完整**,下一步 = 增量 4c(可选)或 增量 5）
 
-1. 新会话自动加载记忆 `agenthub-ccswitch-direction.md`（含 4a/4b-1/4b-2 摘要 + 4b-3 契约 + merge 引擎已建 + 环境 gotcha + 下一步)。
-2. 读本手册:**§3 环境 gotcha(必看)、§4 工作方法、§5 已交付明细(尤其 4a 项目通道模式 + 4b-2 merge 引擎 + 「4b-3 契约」一段)、§6 路线图**。(§7 是增量 3 的 study,仅供回溯。)
-3. **说「开始增量 4b-3」** 即可,据既定纪律弧推进:
-   - ① **计划预备 workflow**(轻量:复核 4b-2 后真实的 `settings_merge.rs` 引擎 + `project_apply.rs` 循环 + mcp 表/格式锚点;设计大体明确,见 §5/§6 4b-3 契约)
-   - ② **writing-plans** 写 bite-sized/TDD/无占位计划(存 `docs/superpowers/plans/`,提交)→ 交用户审
-   - ③ **subagent-driven** 分层批次执行(串行,绝不并行实现):每任务 实现 subagent → 评审(独立复跑门 + spec/对抗安全)→ 修(≤2 轮);Opus 用于 mcp_merge 臂/安全核心,Sonnet 用于 DAO/前端
-   - ④ **finishing-a-development-branch**:本地 `--no-ff` 合并 main + 合并后复验全绿 + 删分支 + 刷新本手册/记忆 +(外部动作)征询推送。
-4. **增量 4b-3 = `<project>/.mcp.json` MERGE**(契约见 §5/§6):**复用 4b-2 已建的 `settings_merge.rs` 引擎**(`merge_with_snapshot`/`reverse_merge`/owned_keys 信封——直接拿来用,几乎免费),仅合并 `mcpServers` 子树(server 由 `spec.content.mcp` id 取自 mcp_servers 表,剥 UI 字段 enabled/source/id/name/description/tags/homepage/docs);写 `<project>/.mcp.json`(项目根,绕开 home-global `get_claude_mcp_path`);`kind="mcp_merge"` + 在 apply 预删/detach 的 catch-all else **之前**加同款 reverse 臂;新增 `ProjectBase::mcp_file()`;**无 `${VAR}`、无 Windows `cmd /c`、无新 schema**(owned_keys v18 已足)。之后 **4c**(非 Claude:Codex/OpenCode `<project>/AGENTS.md` + 各自 dotdir,OpenCode 单数 command/agent;Gemini 蓝图缺)、**增量 5**(Source ingestion,HTTP 不用 git)。
+1. 新会话自动加载记忆 `agenthub-ccswitch-direction.md`（含 4a/4b 全摘要 + merge 引擎 + 环境 gotcha + 下一步候选)。
+2. 读本手册:**§3 环境 gotcha(必看)、§4 工作方法、§5 已交付明细(尤其 4a 项目通道模式 + 4b-2 merge 引擎 + 4b-3)、§6 路线图**。(§7 是增量 3 的 study,仅供回溯。)
+3. **下一步有两个候选,由用户选:**
+   - **增量 5 — Source ingestion(推荐先做)**:从上游仓拉 skills/commands/agents,**不用 git**(HTTP archive 下载 + 备份后覆盖 + detach)。Claude Projects 既已完整,内容来源是更高价值的新支柱。
+   - **增量 4c — 非 Claude 项目通道(breadth,可延后/跳过)**:Codex/OpenCode `<project>/AGENTS.md` + 各自 dotdir(OpenCode 单数 command/agent);Gemini 蓝图缺 target。需 `ProjectBase` 长出 per-(app,kind) content_subdir 映射,且依赖未核实的各工具项目路径行为。
+   说「开始增量 5」或「开始增量 4c」即可。**强烈建议先做 §9 backlog 的 `kind`→enum 小重构**(现有 settings_merge+mcp_merge 两 merge kind 共用 dispatch,enum 让其编译期穷尽、消除字符串 typo 的数据丢失面;独立小增量,跨 profile.rs 7 处 whole_file + DAO serde + 迁移容忍)。
+   据既定纪律弧推进:① 计划预备 workflow(新支柱如增量 5 需完整 study;4c 可轻量)→ ② writing-plans → 交用户审 → ③ subagent-driven 分层执行 → ④ finishing(`--no-ff` 合并 + 复验 + 刷新手册/记忆 + 征询推送)。
 5. **复发教训(务必)**:改某 struct 字段 / 删 pub API 时,**必须 grep `tests/`**——集成测试是独立 crate,只 grep `src/` 会让 `--lib` 通过但 `--all-targets`/全量 `cargo test` 编译失败(3b-2 ConfigService、3c InstalledSkill 各踩一次;4a 的 `ManifestEntry.project_id` 因照此做未再踩)。**验证门用 `cargo clippy --all-targets -- -D warnings` + 全量 `cargo test`(非 `--lib`)+ 前端 `./node_modules/.bin/{tsc --noEmit, vitest run}`,退出码用 `> log 2>&1; echo $?` 捕获。**
 6. 可选:`pnpm tauri dev`(注意 §3 PATH/cc gotcha)验收 Projects 4a(绑目录→播种/编辑 includes→Apply 看 `<project>/.claude/` 出现拷贝→手建 `mine.md`→Detach 验拷贝删、`mine.md` 存、空 `.claude` 留;绑 `$HOME` 应被安全门拒)。
 
