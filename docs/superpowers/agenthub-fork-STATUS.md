@@ -20,7 +20,7 @@
 
 ## 2. 当前状态（main，全绿）
 
-- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1585，14 个 test 二进制全 ok）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
+- `cargo test`（全量,含集成）：**全绿 0 failed**（lib 1584，14 个 test 二进制全 ok）；`clippy --all-targets -D warnings` 净；`cargo fmt --check` 净
 - 前端 `vitest`：**318 passed**（59 文件）；`tsc --noEmit` 净
 - 已交付并合并到 main 的增量:**1(fork)、2(Commands)、2.5(Agents)、3a–3c(Profiles 旗舰全局通道)、4a(Projects 项目通道)、4b-1(项目 CLAUDE.md)、4b-2(项目 settings.json MERGE + `${VAR}`)**。
 - DB schema 版本:**v18**(…skills.tags=v16,projects 表+apply_manifest.project_id=v17,**apply_manifest.owned_keys=v18**)。4b-2 的 `ProjectSpec.dotfiles.settings` 走 spec JSON blob serde(无存储迁移;v18 仅为 owned_keys)。
@@ -132,6 +132,7 @@ profiles.spec JSON 形如 `{content:{skills:[],commands:[],agents:[],mcp:[]}, va
 ## 9. 待办/已记的小项（非阻断,可在后续增量顺带）
 
 - **Projects(4b-2)minor**(Opus 复审 SOUND 后记):空对象片段 `{}` 仍 atomic-write + 记一条零键 `settings_merge` 行(reverse 空操作重写),无害冗余,可在 `owned.is_empty()` 时短路省去。
+- **/simplify 延后项(4b-2 后记,记 backlog)**:(1) **`ManifestEntry.kind` stringly-typed**(`"skill"/"command"/"agent"/"project_memory"/"settings_merge"/"whole_file"`)→ 改 `enum ManifestKind`(serde),让 `teardown_manifest_row` 的 dispatch 编译期穷尽(typo 会落进 whole-file-delete else = 数据丢失面);跨全局 profile 路径 + DAO serde + 迁移(须容忍旧/未知字符串不 panic),是独立小增量,**与 4b-3 一起做最佳**;(2) `merge_with_snapshot`/`json_deep_merge` 递归无深度上限(operator-authored 片段,低危),未来硬化;(3) `TempHome` 测试守卫在全仓 ~15 个测试模块重复定义 → 抽到共享 `#[cfg(test)] test_helpers`(codebase 级,超单增量范围)。已做:`/simplify` 抽了 `teardown_manifest_row`(单源化 CRITICAL dispatch,为 4b-3 `mcp_merge` 臂铺路)、复用 `config::sort_json_keys`、去 reverse_merge 的 clone、`get_manifest_for_profile` 直接映射(merge `6f1965f4`)。
 - **Projects(4b-1)minor**(Opus 总评审 SOUND 后记):`memory_file` 未重 canonicalize → `<root>/CLAUDE.md` 若为软链会被 `exists()`/读跟随;但 prior=None→判未纳管→skip + `fs::rename` 替换链接本身,无可利用穿写,与全局 `render_whole_file` 同 posture,可选加一行注释。
 - **Projects(4a)minors**(Opus 总评审 SOUND 后记,均 fail-safe/benign):(1) skill 拆除按 SSOT 当前哈希(非记录哈希)判别 → SSOT 更新后 detach 漏删拷贝而非误删,建议加注释;(2) repo 移动+原路径重建时 apply/detach(entered_path 派生 channel)与 project_manifest(project_path 派生)可能不同 channel,benign,可改从 project_path 派生求对称;(3) 单次 apply 内 resolve→write 的 TOCTOU 窗口(同既有全局 profile_render,下次 apply 重 resolve 闭合);(4) `spec.vars` 已存但 4a 未读(留 4b)。
 - **Profiles minors**:(3b-2)进程env 跨会话变动可致 settings.json 片段 backfill 重渲染失配(窄,已注释,建议片段用 spec.vars/provider.env);(3b-3)`__profile__:` 保留前缀仅在 upsert(enabled=true)拦截、未全命令层校验;CLAUDE.md textarea 未 app-gate(后端硬门兜底);delete_profile 用 active_profile 表代理隐藏行 enabled 态;(3c)v16 迁移测试未走真·无列 ALTER 路径(helper 已验证);缺「字面∩@tag 同项」去重测试(HashSet 可证)。
